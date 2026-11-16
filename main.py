@@ -14,7 +14,7 @@ load_dotenv()
 app = FastAPI(title="Agent Sophia x Bifrost x Tavily")
 
 TAVILY_KEY = os.getenv("TAVILY_API_KEY", "")
-MODEL = os.getenv("LLM_MODEL", "gemini-3.8-flash")
+MODEL = os.getenv("LLM_MODEL", "gemini/gemini-3.8-flash")
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
 DOCUMENT_CHUNK_CHARS = 14000
 SUMMARY_GROUP_SIZE = 8
@@ -22,7 +22,7 @@ MATCH_GROUP_FILES = 8
 MAX_DOCUMENT_SUMMARY_CHARS = 1800
 # Every LLM call goes through the Bifrost gateway.
 llm = OpenAI(
-    base_url=os.getenv("LLM_BASE_URL", "http://localhost:8080/openai"),
+    base_url=os.getenv("LLM_BASE_URL", "http://localhost:8080/openai/v1"),
     api_key="dummy",
     timeout=120,
     max_retries=0,

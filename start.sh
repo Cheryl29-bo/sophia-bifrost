@@ -12,6 +12,9 @@ mkdir -p "$BIFROST_APP_DIR"
 cat > "$BIFROST_APP_DIR/config.json" <<'EOF'
 {
   "$schema": "https://www.getbifrost.ai/schema",
+  "client": {
+    "enforce_auth_on_inference": false
+  },
   "providers": {
     "gemini": {
       "keys": [
