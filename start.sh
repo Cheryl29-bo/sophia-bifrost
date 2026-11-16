@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+export GOGC=50
+export GOMEMLIMIT=240MiB
+
 : "${GEMINI_API_KEY:?Set GEMINI_API_KEY in the deployment environment}"
 
 BIFROST_APP_DIR="${BIFROST_APP_DIR:-/app/bifrost-data}"
@@ -25,36 +28,28 @@ cat > "$BIFROST_APP_DIR/config.json" <<'EOF'
 EOF
 
 bifrost -host 127.0.0.1 -port 8080 -app-dir "$BIFROST_APP_DIR" &
-BIFROST_PID=$!
 
-cleanup() {
-    kill "$BIFROST_PID" 2>/dev/null || true
-    wait "$BIFROST_PID" 2>/dev/null || true
-}
-
-trap cleanup EXIT
-
-python - "$BIFROST_PID" <<'PY'
-import os
-import socket
+python - <<'PY'
 import sys
 import time
+import urllib.error
+import urllib.request
 
-pid = int(sys.argv[1])
-deadline = time.monotonic() + 60
+deadline = time.monotonic() + 45
 
-while time.monotonic() < deadline:
+while True:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        print("Bifrost /health is not ready after 45 seconds; starting Sophia anyway", file=sys.stderr)
+        break
     try:
-        with socket.create_connection(("127.0.0.1", 8080), timeout=1):
-            break
-    except OSError:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            raise SystemExit("Bifrost exited before opening port 8080")
-        time.sleep(0.5)
-else:
-    raise SystemExit("Bifrost did not open port 8080 within 60 seconds")
+        with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=min(1, remaining)) as response:
+            if 200 <= response.status < 300:
+                print("Bifrost health check passed")
+                break
+    except (urllib.error.URLError, TimeoutError, OSError):
+        pass
+    time.sleep(min(1, max(0, deadline - time.monotonic())))
 PY
 
-python -m uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}"
+exec python -m uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}" --workers 1
