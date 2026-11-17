@@ -37,13 +37,21 @@ def ask(system: str, user: str) -> str:
     if BIFROST_FALLBACK_MODEL:
         request["extra_body"] = {"fallbacks": [BIFROST_FALLBACK_MODEL]}
 
-    for delay in (3, 6, 10, None):
+    retry_counts = {429: 0, 503: 0}
+    retry_delays = {429: (3, 6, 10), 503: (1, 2)}
+    while True:
         try:
             response = llm.chat.completions.create(**request)
             return response.choices[0].message.content
         except APIStatusError as exc:
-            if exc.status_code not in (429, 503) or delay is None:
+            if exc.status_code not in retry_delays:
                 raise
+            attempt = retry_counts[exc.status_code]
+            delays = retry_delays[exc.status_code]
+            if attempt >= len(delays):
+                raise
+            retry_counts[exc.status_code] += 1
+            delay = delays[attempt]
             time.sleep(delay)
 
 
@@ -213,38 +221,41 @@ async def match(
     for offset in range(0, len(files), 4):
         batch = await asyncio.gather(*(process_upload(upload) for upload in files[offset:offset + 4]))
         documents.extend(document for document in batch if document)
-    documents = await summarize_vault(documents, semaphore)
+
+    async def search_jobs() -> list[dict]:
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    "https://api.tavily.com/search",
+                    headers={"Authorization": f"Bearer {TAVILY_KEY}"},
+                    json={"query": f"{role or 'career opportunities'} {location}", "max_results": 6},
+                )
+                response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="Tavily opportunity search timed out. Please retry and resubmit your documents.",
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Tavily opportunity search failed with status {exc.response.status_code}. Please try again.",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Sophia could not connect to Tavily for opportunity search. Please try again.",
+            ) from exc
+        return [
+            {"title": job["title"], "url": job["url"], "snippet": job["content"][:400]}
+            for job in response.json().get("results", [])
+        ]
+
+    documents, jobs = await asyncio.gather(
+        summarize_vault(documents, semaphore),
+        search_jobs(),
+    )
     uploaded_names = {doc["filename"] for doc in documents}
-
-    # 1. Job discovery with Tavily.
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                "https://api.tavily.com/search",
-                headers={"Authorization": f"Bearer {TAVILY_KEY}"},
-                json={"query": f"{role or 'career opportunities'} {location}", "max_results": 6},
-            )
-            response.raise_for_status()
-    except httpx.TimeoutException as exc:
-        raise HTTPException(
-            status_code=504,
-            detail="Tavily opportunity search timed out. Please retry and resubmit your documents.",
-        ) from exc
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Tavily opportunity search failed with status {exc.response.status_code}. Please try again.",
-        ) from exc
-    except httpx.RequestError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail="Sophia could not connect to Tavily for opportunity search. Please try again.",
-        ) from exc
-
-    jobs = [
-        {"title": j["title"], "url": j["url"], "snippet": j["content"][:400]}
-        for j in response.json().get("results", [])
-    ]
 
     vault = [
         {"filename": doc["filename"], "status": doc["status"], "warning": doc.get("warning", "")}
