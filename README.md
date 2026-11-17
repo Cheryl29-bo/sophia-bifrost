@@ -19,4 +19,5 @@ For Render or Railway, deploy from this Dockerfile and add `GEMINI_API_KEY`
 and `TAVILY_API_KEY` as service environment variables. Do not commit `.env`;
 it is excluded from Git and the Docker build context. Bifrost's generated
 configuration refers to the Gemini key through the environment and does not
-write its value to the image.
+write its value to the image. Startup uses `gemini/gemini-3.8-flash-lite` as
+the Bifrost request fallback; set `BIFROST_FALLBACK_MODEL` to override it.

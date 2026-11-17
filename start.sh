@@ -5,6 +5,7 @@ export GOGC=50
 export GOMEMLIMIT=240MiB
 
 : "${GEMINI_API_KEY:?Set GEMINI_API_KEY in the deployment environment}"
+export BIFROST_FALLBACK_MODEL="${BIFROST_FALLBACK_MODEL:-gemini/gemini-3.8-flash-lite}"
 
 BIFROST_APP_DIR="${BIFROST_APP_DIR:-/app/bifrost-data}"
 mkdir -p "$BIFROST_APP_DIR"
